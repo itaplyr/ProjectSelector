@@ -1,8 +1,10 @@
+#![allow(dead_code)]
+
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::SystemTime;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Commit {
     pub hash: String,
     pub message: String,
@@ -10,13 +12,13 @@ pub struct Commit {
     pub date: String,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct FileEntry {
     pub status: String,
     pub file: String,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct GitInfo {
     pub connected: bool,
     pub branch: String,
@@ -28,7 +30,7 @@ pub struct GitInfo {
     pub modified_files: Vec<FileEntry>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Project {
     pub name: String,
     pub path: PathBuf,
@@ -163,9 +165,14 @@ fn get_git_info(project_path: &std::path::Path) -> GitInfo {
 }
 
 pub fn get_projects(projects_dir: &std::path::Path) -> Vec<Project> {
+    let start = std::time::Instant::now();
+
     let entries = match std::fs::read_dir(projects_dir) {
         Ok(e) => e,
-        Err(_) => return Vec::new(),
+        Err(_) => {
+            eprintln!("[projects] failed to read dir: {:?}", projects_dir);
+            return Vec::new();
+        }
     };
 
     let mut projects: Vec<Project> = entries
@@ -177,7 +184,10 @@ pub fn get_projects(projects_dir: &std::path::Path) -> Vec<Project> {
             let last_modified = std::fs::metadata(&path)
                 .and_then(|m| m.modified())
                 .unwrap_or_else(|_| std::time::SystemTime::UNIX_EPOCH);
+            let git_start = std::time::Instant::now();
             let git_info = get_git_info(&path);
+            let git_elapsed = git_start.elapsed();
+            eprintln!("[git] {}: {:.3}s", name, git_elapsed.as_secs_f64());
             Project {
                 name,
                 path,
@@ -188,5 +198,8 @@ pub fn get_projects(projects_dir: &std::path::Path) -> Vec<Project> {
         .collect();
 
     projects.sort_by(|a, b| b.last_modified.cmp(&a.last_modified));
+
+    let elapsed = start.elapsed();
+    eprintln!("[projects] scanned {} dirs in {:.3}s", projects.len(), elapsed.as_secs_f64());
     projects
 }

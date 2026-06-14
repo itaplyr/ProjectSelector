@@ -2468,6 +2468,8 @@ name = "project-selector"
 version = "0.1.0"
 dependencies = [
  "eframe",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
