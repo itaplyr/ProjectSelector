@@ -1,10 +1,10 @@
 use std::path::PathBuf;
 use std::sync::mpsc;
 
-use eframe::egui::{self, Vec2};
+use egui::{self, Vec2};
 use crate::projects;
 
-const BG: egui::Color32 = egui::Color32::from_rgb(0x1f, 0x1f, 0x21);
+const BG: egui::Color32 = egui::Color32::from_rgb(0x00, 0x00, 0x00);
 const SURFACE: egui::Color32 = egui::Color32::from_rgb(0x24, 0x24, 0x26);
 const TEXT: egui::Color32 = egui::Color32::from_rgb(0x92, 0x90, 0x92);
 
@@ -19,12 +19,12 @@ enum Mode {
 }
 
 pub struct ProjectApp {
+    pub should_close: bool,
     projects: Vec<projects::Project>,
     selected: usize,
     search_query: String,
     mode: Mode,
     needs_reload: bool,
-    was_focused: bool,
     project_rx: Option<mpsc::Receiver<Vec<projects::Project>>>,
     confirm_delete: Option<usize>,
     confirm_choice: usize,
@@ -35,12 +35,12 @@ pub struct ProjectApp {
 impl Default for ProjectApp {
     fn default() -> Self {
         Self {
+            should_close: false,
             projects: Vec::new(),
             selected: 0,
             search_query: String::new(),
             mode: Mode::Personal,
             needs_reload: false,
-            was_focused: false,
             project_rx: None,
             confirm_delete: None,
             confirm_choice: 0,
@@ -124,27 +124,15 @@ impl ProjectApp {
     fn open_in_vscode(&self, path: &std::path::Path) {
         let _ = std::process::Command::new("code").arg(path).spawn();
     }
-}
 
-impl eframe::App for ProjectApp {
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        let ctx = ui.ctx().clone();
-
+    pub fn update(&mut self, ctx: &egui::Context) {
         if !self.logged_first_frame {
             self.logged_first_frame = true;
             eprintln!("[app] first frame at {:.3}s", self.app_start.elapsed().as_secs_f64());
         }
 
-        let is_focused = ctx.input(|i| i.focused);
-        if self.was_focused && !is_focused {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-            return;
-        }
-        self.was_focused = is_focused;
+        setup_style(ctx);
 
-        setup_style(&ctx);
-
-        // Check if background refresh completed
         if let Some(ref rx) = self.project_rx {
             if let Ok(fresh) = rx.try_recv() {
                 self.projects = fresh;
@@ -168,12 +156,10 @@ impl eframe::App for ProjectApp {
                 Mode::Customers => cache_dir.join("customers.json"),
             };
 
-            // Load cache instantly
             if let Some(cached) = load_cache(&cache_file) {
                 self.projects = cached;
             }
 
-            // Spawn background refresh
             let (tx, rx) = mpsc::channel();
             self.project_rx = Some(rx);
             std::thread::spawn(move || {
@@ -193,9 +179,7 @@ impl eframe::App for ProjectApp {
         let flen = filtered.len();
         let show_create = flen == 0 && !self.search_query.is_empty();
 
-        // Handle keyboard navigation before widgets process events
         let mut should_open = false;
-        let mut should_close = false;
         let mut should_create = false;
         let mut should_delete = false;
         ctx.input(|i| {
@@ -244,7 +228,7 @@ impl eframe::App for ProjectApp {
                             self.selected = 0;
                         }
                         egui::Event::Key { key: egui::Key::Escape, pressed: true, .. } => {
-                            should_close = true;
+                            self.should_close = true;
                         }
                         egui::Event::Key { key: egui::Key::Enter, pressed: true, .. } => {
                             if show_create {
@@ -272,7 +256,6 @@ impl eframe::App for ProjectApp {
             self.selected = filtered[0];
         }
 
-        // Remove consumed events so egui widgets don't also process them
         ctx.input_mut(|i| {
             if self.confirm_delete.is_some() {
                 i.events.retain(|e| {
@@ -289,8 +272,7 @@ impl eframe::App for ProjectApp {
             }
         });
 
-        if should_close {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        if self.should_close {
             return;
         }
 
@@ -303,7 +285,7 @@ impl eframe::App for ProjectApp {
             let new_path = base.join(&self.search_query);
             let _ = std::fs::create_dir_all(&new_path);
             self.open_in_vscode(&new_path);
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            self.should_close = true;
             return;
         }
 
@@ -322,247 +304,246 @@ impl eframe::App for ProjectApp {
 
         if should_open && self.selected < self.projects.len() {
             self.open_in_vscode(&self.projects[self.selected].path);
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            self.should_close = true;
             return;
         }
 
-        egui::Frame::new().fill(BG).show(ui, |ui| {
-            // Search bar at the top
-            ui.add_space(6.0);
-            let search_width = 420.0;
-            let left = (ui.available_width() - search_width).max(0.0) / 2.0;
-            ui.horizontal(|ui| {
-                ui.add_space(left);
-                let resp = ui.add(
-                    egui::TextEdit::singleline(&mut self.search_query)
-                        .hint_text("Search projects...")
-                        .desired_width(search_width)
-                        .font(egui::TextStyle::Body)
-                    .margin(egui::vec2(14.0, 16.0))
-                    .frame(egui::Frame {
-                        fill: SURFACE,
-                        corner_radius: egui::CornerRadius::same(14),
-                        inner_margin: egui::Margin::symmetric(10, 6),
-                        ..Default::default()
-                    }),
-                );
-                resp.request_focus();
-            });
-
-            // Mode tabs
-            let tab_height = 28.0;
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 0.0;
-                let total_w = ui.available_width();
-                let tab_w = total_w / 2.0;
-                for &mode in &[Mode::Personal, Mode::Customers] {
-                    let label = match mode {
-                        Mode::Personal => "Personal",
-                        Mode::Customers => "Customers",
-                    };
-                    let active = self.mode == mode;
-                    let (rect, resp) = ui.allocate_exact_size(
-                        Vec2::new(tab_w, tab_height),
-                        egui::Sense::click(),
+        #[allow(deprecated)]
+        egui::CentralPanel::default().show(ctx, |ui| {
+            egui::Frame::new().fill(BG).show(ui, |ui| {
+                ui.add_space(6.0);
+                let search_width = 420.0;
+                let left = (ui.available_width() - search_width).max(0.0) / 2.0;
+                ui.horizontal(|ui| {
+                    ui.add_space(left);
+                    let resp = ui.add(
+                        egui::TextEdit::singleline(&mut self.search_query)
+                            .hint_text("Search projects...")
+                            .desired_width(search_width)
+                            .font(egui::TextStyle::Body)
+                        .margin(egui::vec2(14.0, 16.0))
+                        .frame(egui::Frame {
+                            fill: SURFACE,
+                            corner_radius: egui::CornerRadius::same(14),
+                            inner_margin: egui::Margin::symmetric(10, 6),
+                            ..Default::default()
+                        }),
                     );
+                    resp.request_focus();
+                });
 
-                    ui.painter().rect_filled(rect, 0.0, BG);
-
-                    ui.painter().text(
-                        rect.center(),
-                        egui::Align2::CENTER_CENTER,
-                        label,
-                        egui::FontId::proportional(12.0),
-                        if active { TEXT } else { MUTED },
-                    );
-
-                    if active {
-                        ui.painter().rect_filled(
-                            egui::Rect::from_min_size(
-                                egui::pos2(rect.min.x, rect.max.y - 2.0),
-                                egui::vec2(rect.width(), 2.0),
-                            ),
-                            0.0,
-                            TEXT,
+                let tab_height = 28.0;
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    let total_w = ui.available_width();
+                    let tab_w = total_w / 2.0;
+                    for &mode in &[Mode::Personal, Mode::Customers] {
+                        let label = match mode {
+                            Mode::Personal => "Personal",
+                            Mode::Customers => "Customers",
+                        };
+                        let active = self.mode == mode;
+                        let (rect, resp) = ui.allocate_exact_size(
+                            Vec2::new(tab_w, tab_height),
+                            egui::Sense::click(),
                         );
-                    }
 
-                    if resp.clicked() && self.mode != mode {
-                        self.mode = mode;
-                        self.needs_reload = true;
-                        self.selected = 0;
-                    }
-                }
-            });
-
-            // Project list - fills remaining space
-            ui.set_min_height(ui.available_height());
-            egui::ScrollArea::vertical()
-                .auto_shrink([false; 2])
-                .show(ui, |ui| {
-                    if show_create {
-                        let height = 52.0;
-                        let width = ui.available_width();
-                        let (rect, resp) = ui.allocate_exact_size(Vec2::new(width.max(0.0), height), egui::Sense::click());
-
-                        let border = egui::Rect::from_min_size(
-                            rect.left_top(),
-                            Vec2::new(3.0, height),
-                        );
-                        ui.painter().rect_filled(border, 0.0, BLUE);
-
-                        let card_rect = egui::Rect::from_min_size(
-                            egui::pos2(rect.min.x + 3.0, rect.min.y),
-                            Vec2::new(width - 3.0, height),
-                        );
-                        ui.painter().rect_filled(card_rect, 6.0, SURFACE);
+                        ui.painter().rect_filled(rect, 0.0, BG);
 
                         ui.painter().text(
-                            egui::pos2(rect.min.x + 14.0, rect.min.y + 7.0),
-                            egui::Align2::LEFT_TOP,
-                            &format!("+  {}", self.search_query),
-                            egui::FontId::proportional(14.0),
-                            TEXT,
+                            rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            label,
+                            egui::FontId::proportional(12.0),
+                            if active { TEXT } else { MUTED },
                         );
 
-                        ui.painter().text(
-                            egui::pos2(rect.min.x + 14.0, rect.min.y + 28.0),
-                            egui::Align2::LEFT_TOP,
-                            "Create new project",
-                            egui::FontId::proportional(11.0),
-                            MUTED,
-                        );
+                        if active {
+                            ui.painter().rect_filled(
+                                egui::Rect::from_min_size(
+                                    egui::pos2(rect.min.x, rect.max.y - 2.0),
+                                    egui::vec2(rect.width(), 2.0),
+                                ),
+                                0.0,
+                                TEXT,
+                            );
+                        }
 
-                        resp.scroll_to_me(Some(egui::Align::Center));
-
-                        if resp.clicked() {
-                            let home = std::env::var("HOME").unwrap_or_else(|_| "/home/itaplyr".to_string());
-                            let base = match self.mode {
-                                Mode::Personal => PathBuf::from(&home).join("Projects"),
-                                Mode::Customers => PathBuf::from(&home).join("CustomerProjects"),
-                            };
-                            let new_path = base.join(&self.search_query);
-                            let _ = std::fs::create_dir_all(&new_path);
-                            self.open_in_vscode(&new_path);
-                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                            return;
+                        if resp.clicked() && self.mode != mode {
+                            self.mode = mode;
+                            self.needs_reload = true;
+                            self.selected = 0;
                         }
                     }
+                });
 
-                    for &idx in &filtered {
-                        let project = &self.projects[idx];
-                        let is_selected = idx == self.selected;
-                        let _card_id = ui.id().with(format!("card_{}", idx));
+                ui.set_min_height(ui.available_height());
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false; 2])
+                    .show(ui, |ui| {
+                        if show_create {
+                            let height = 52.0;
+                            let width = ui.available_width();
+                            let (rect, resp) = ui.allocate_exact_size(Vec2::new(width.max(0.0), height), egui::Sense::click());
 
-                        let height = 52.0;
-                        let width = ui.available_width();
-                        let (rect, resp) = ui.allocate_exact_size(Vec2::new(width.max(0.0), height), egui::Sense::click());
-
-                        let bg = if is_selected { SURFACE } else { egui::Color32::TRANSPARENT };
-
-                        if is_selected {
                             let border = egui::Rect::from_min_size(
                                 rect.left_top(),
                                 Vec2::new(3.0, height),
                             );
                             ui.painter().rect_filled(border, 0.0, BLUE);
-                        }
 
-                        let card_rect = egui::Rect::from_min_size(
-                            egui::pos2(rect.min.x + if is_selected { 3.0 } else { 0.0 }, rect.min.y),
-                            Vec2::new(width - if is_selected { 3.0 } else { 0.0 }, height),
-                        );
-                        ui.painter().rect_filled(card_rect, 6.0, bg);
+                            let card_rect = egui::Rect::from_min_size(
+                                egui::pos2(rect.min.x + 3.0, rect.min.y),
+                                Vec2::new(width - 3.0, height),
+                            );
+                            ui.painter().rect_filled(card_rect, 6.0, SURFACE);
 
-                        if resp.clicked() {
-                            self.selected = idx;
-                        }
-                        if resp.double_clicked() {
-                            self.open_in_vscode(&project.path);
-                            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-                            return;
-                        }
+                            ui.painter().text(
+                                egui::pos2(rect.min.x + 14.0, rect.min.y + 7.0),
+                                egui::Align2::LEFT_TOP,
+                                &format!("+  {}", self.search_query),
+                                egui::FontId::proportional(14.0),
+                                TEXT,
+                            );
 
-                        if is_selected {
+                            ui.painter().text(
+                                egui::pos2(rect.min.x + 14.0, rect.min.y + 28.0),
+                                egui::Align2::LEFT_TOP,
+                                "Create new project",
+                                egui::FontId::proportional(11.0),
+                                MUTED,
+                            );
+
                             resp.scroll_to_me(Some(egui::Align::Center));
+
+                            if resp.clicked() {
+                                let home = std::env::var("HOME").unwrap_or_else(|_| "/home/itaplyr".to_string());
+                                let base = match self.mode {
+                                    Mode::Personal => PathBuf::from(&home).join("Projects"),
+                                    Mode::Customers => PathBuf::from(&home).join("CustomerProjects"),
+                                };
+                                let new_path = base.join(&self.search_query);
+                                let _ = std::fs::create_dir_all(&new_path);
+                                self.open_in_vscode(&new_path);
+                                self.should_close = true;
+                                return;
+                            }
                         }
 
-                        ui.painter().text(
-                            egui::pos2(rect.min.x + 14.0, rect.min.y + 7.0),
-                            egui::Align2::LEFT_TOP,
-                            &project.name,
-                            egui::FontId::proportional(14.0),
-                            TEXT,
-                        );
+                        for &idx in &filtered {
+                            let project = &self.projects[idx];
+                            let is_selected = idx == self.selected;
+                            let _card_id = ui.id().with(format!("card_{}", idx));
 
-                        let (branch_label, meta_color) = if project.git_info.connected {
-                            if project.git_info.files_changed > 0 {
-                                (format!("{}  {} changed", project.git_info.branch, project.git_info.files_changed), YELLOW)
-                            } else {
-                                (project.git_info.branch.clone(), MUTED)
+                            let height = 52.0;
+                            let width = ui.available_width();
+                            let (rect, resp) = ui.allocate_exact_size(Vec2::new(width.max(0.0), height), egui::Sense::click());
+
+                            let bg = if is_selected { SURFACE } else { egui::Color32::TRANSPARENT };
+
+                            if is_selected {
+                                let border = egui::Rect::from_min_size(
+                                    rect.left_top(),
+                                    Vec2::new(3.0, height),
+                                );
+                                ui.painter().rect_filled(border, 0.0, BLUE);
                             }
-                        } else {
-                            ("No git".to_string(), MUTED)
-                        };
 
-                        let meta = format!("{}   {}", time_ago(project.last_modified), branch_label);
+                            let card_rect = egui::Rect::from_min_size(
+                                egui::pos2(rect.min.x + if is_selected { 3.0 } else { 0.0 }, rect.min.y),
+                                Vec2::new(width - if is_selected { 3.0 } else { 0.0 }, height),
+                            );
+                            ui.painter().rect_filled(card_rect, 6.0, bg);
 
-                        ui.painter().text(
-                            egui::pos2(rect.min.x + 14.0, rect.min.y + 28.0),
-                            egui::Align2::LEFT_TOP,
-                            &meta,
-                            egui::FontId::proportional(11.0),
-                            meta_color,
-                        );
-                    }
-                });
-        });
+                            if resp.clicked() {
+                                self.selected = idx;
+                            }
+                            if resp.double_clicked() {
+                                self.open_in_vscode(&project.path);
+                                self.should_close = true;
+                                return;
+                            }
 
-        if let Some(idx) = self.confirm_delete {
-            let name = if idx < self.projects.len() {
-                self.projects[idx].name.clone()
-            } else {
-                String::new()
-            };
-            let screen = ctx.viewport_rect();
+                            if is_selected {
+                                resp.scroll_to_me(Some(egui::Align::Center));
+                            }
 
-            ui.painter().rect_filled(screen, 0.0, egui::Color32::from_black_alpha(160));
+                            ui.painter().text(
+                                egui::pos2(rect.min.x + 14.0, rect.min.y + 7.0),
+                                egui::Align2::LEFT_TOP,
+                                &project.name,
+                                egui::FontId::proportional(14.0),
+                                TEXT,
+                            );
 
-            let dlg = egui::Rect::from_center_size(screen.center(), egui::vec2(360.0, 120.0));
-            ui.painter().rect_filled(dlg, 8.0, SURFACE);
+                            let (branch_label, meta_color) = if project.git_info.connected {
+                                if project.git_info.files_changed > 0 {
+                                    (format!("{}  {} changed", project.git_info.branch, project.git_info.files_changed), YELLOW)
+                                } else {
+                                    (project.git_info.branch.clone(), MUTED)
+                                }
+                            } else {
+                                ("No git".to_string(), MUTED)
+                            };
 
-            ui.painter().text(
-                egui::pos2(dlg.center().x, dlg.min.y + 30.0),
-                egui::Align2::CENTER_CENTER,
-                &format!("Delete \"{}\"?", name),
-                egui::FontId::proportional(14.0),
-                TEXT,
-            );
+                            let meta = format!("{}   {}", time_ago(project.last_modified), branch_label);
 
-            for i in 0..2 {
-                let label = if i == 0 { "Cancel" } else { "Delete" };
-                let selected = self.confirm_choice == i;
-                let x = dlg.center().x + (i as f32 - 0.5) * 96.0 - 40.0;
-                let btn = egui::Rect::from_min_size(
-                    egui::pos2(x, dlg.max.y - 36.0),
-                    egui::vec2(80.0, 28.0),
-                );
+                            ui.painter().text(
+                                egui::pos2(rect.min.x + 14.0, rect.min.y + 28.0),
+                                egui::Align2::LEFT_TOP,
+                                &meta,
+                                egui::FontId::proportional(11.0),
+                                meta_color,
+                            );
+                        }
+                    });
+            });
 
-                if selected {
-                    ui.painter().rect_filled(btn, 4.0, BLUE);
+            if let Some(idx) = self.confirm_delete {
+                let name = if idx < self.projects.len() {
+                    self.projects[idx].name.clone()
                 } else {
-                    ui.painter().rect_stroke(btn, 4.0, egui::Stroke::new(1.0, MUTED), egui::StrokeKind::Inside);
-                }
+                    String::new()
+                };
+                let screen = ctx.viewport_rect();
+
+                ui.painter().rect_filled(screen, 0.0, egui::Color32::from_black_alpha(160));
+
+                let dlg = egui::Rect::from_center_size(screen.center(), egui::vec2(360.0, 120.0));
+                ui.painter().rect_filled(dlg, 8.0, SURFACE);
 
                 ui.painter().text(
-                    btn.center(),
+                    egui::pos2(dlg.center().x, dlg.min.y + 30.0),
                     egui::Align2::CENTER_CENTER,
-                    label,
-                    egui::FontId::proportional(12.0),
-                    if selected { BG } else { TEXT },
+                    &format!("Delete \"{}\"?", name),
+                    egui::FontId::proportional(14.0),
+                    TEXT,
                 );
+
+                for i in 0..2 {
+                    let label = if i == 0 { "Cancel" } else { "Delete" };
+                    let selected = self.confirm_choice == i;
+                    let x = dlg.center().x + (i as f32 - 0.5) * 96.0 - 40.0;
+                    let btn = egui::Rect::from_min_size(
+                        egui::pos2(x, dlg.max.y - 36.0),
+                        egui::vec2(80.0, 28.0),
+                    );
+
+                    if selected {
+                        ui.painter().rect_filled(btn, 4.0, BLUE);
+                    } else {
+                        ui.painter().rect_stroke(btn, 4.0, egui::Stroke::new(1.0_f32, MUTED), egui::StrokeKind::Inside);
+                    }
+
+                    ui.painter().text(
+                        btn.center(),
+                        egui::Align2::CENTER_CENTER,
+                        label,
+                        egui::FontId::proportional(12.0),
+                        if selected { BG } else { TEXT },
+                    );
+                }
             }
-        }
+        });
     }
 }
-

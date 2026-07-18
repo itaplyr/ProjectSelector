@@ -4,7 +4,14 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-eframe = "0.34"
+egui = "0.34"
+egui_glow = "0.34"
+glow = "0.17"
+wayland-client = "0.31"
+smithay-client-toolkit = { version = "0.20", features = ["xkbcommon"] }
+wayland-egl = "0.32"
+wayland-backend = { version = "0.3", features = ["client_system"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-
+log = "0.4"
+env_logger = "0.11"
