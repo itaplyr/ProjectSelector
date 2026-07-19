@@ -85,8 +85,8 @@ use wayland_client::{
     Connection, Proxy, QueueHandle,
 };
 
-const WIDTH: u32 = 620;
-const HEIGHT: u32 = 520;
+const WIDTH: u32 = 382;
+const HEIGHT: u32 = 402;
 const NAMESPACE: &str = "project-selector";
 
 fn keysym_to_egui_key(keysym: Keysym) -> Option<egui::Key> {
@@ -286,8 +286,10 @@ impl KeyboardHandler for AppState {
                 repeat: false,
                 modifiers: self.modifiers,
             });
-        } else if let Some(text) = event.utf8 {
-            if !text.is_empty() {
+        }
+        if let Some(text) = event.utf8 {
+            let is_printable = text.chars().all(|c| !c.is_control());
+            if is_printable && !text.is_empty() {
                 self.pending_events.push(egui::Event::Text(text));
             }
         }

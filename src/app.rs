@@ -9,13 +9,14 @@ const SURFACE: egui::Color32 = egui::Color32::from_rgb(0x24, 0x24, 0x26);
 const TEXT: egui::Color32 = egui::Color32::from_rgb(0x92, 0x90, 0x92);
 
 const MUTED: egui::Color32 = egui::Color32::from_rgb(0x6c, 0x70, 0x86);
-const BLUE: egui::Color32 = egui::Color32::from_rgb(0x89, 0xb4, 0xfa);
-const YELLOW: egui::Color32 = egui::Color32::from_rgb(0xf9, 0xe2, 0xaf);
+const BLUE: egui::Color32 = egui::Color32::from_rgb(0xff, 0xff, 0xff);
+const YELLOW: egui::Color32 = egui::Color32::from_rgb(0xff, 0xff, 0xff);
+const WHITE: egui::Color32 = egui::Color32::from_rgb(0xff, 0xff, 0xff);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Mode {
     Personal,
-    Customers,
+    School,
 }
 
 pub struct ProjectApp {
@@ -148,12 +149,12 @@ impl ProjectApp {
             let home = std::env::var("HOME").unwrap_or_else(|_| "/home/itaplyr".to_string());
             let base = match self.mode {
                 Mode::Personal => PathBuf::from(&home).join("Projects"),
-                Mode::Customers => PathBuf::from(&home).join("CustomerProjects"),
+                Mode::School => PathBuf::from(&home).join("SchoolProjects"),
             };
             let cache_dir = PathBuf::from(&home).join(".cache/project-selector");
             let cache_file = match self.mode {
                 Mode::Personal => cache_dir.join("personal.json"),
-                Mode::Customers => cache_dir.join("customers.json"),
+                Mode::School => cache_dir.join("School.json"),
             };
 
             if let Some(cached) = load_cache(&cache_file) {
@@ -221,8 +222,8 @@ impl ProjectApp {
                         }
                         egui::Event::Key { key: egui::Key::Tab, pressed: true, .. } => {
                             self.mode = match self.mode {
-                                Mode::Personal => Mode::Customers,
-                                Mode::Customers => Mode::Personal,
+                                Mode::Personal => Mode::School,
+                                Mode::School => Mode::Personal,
                             };
                             self.needs_reload = true;
                             self.selected = 0;
@@ -280,7 +281,7 @@ impl ProjectApp {
             let home = std::env::var("HOME").unwrap_or_else(|_| "/home/itaplyr".to_string());
             let base = match self.mode {
                 Mode::Personal => PathBuf::from(&home).join("Projects"),
-                Mode::Customers => PathBuf::from(&home).join("CustomerProjects"),
+                Mode::School => PathBuf::from(&home).join("SchoolProjects"),
             };
             let new_path = base.join(&self.search_query);
             let _ = std::fs::create_dir_all(&new_path);
@@ -323,8 +324,8 @@ impl ProjectApp {
                             .font(egui::TextStyle::Body)
                         .margin(egui::vec2(14.0, 16.0))
                         .frame(egui::Frame {
-                            fill: SURFACE,
-                            corner_radius: egui::CornerRadius::same(14),
+                            fill: BG,
+                            corner_radius: egui::CornerRadius::ZERO,
                             inner_margin: egui::Margin::symmetric(10, 6),
                             ..Default::default()
                         }),
@@ -337,10 +338,10 @@ impl ProjectApp {
                     ui.spacing_mut().item_spacing.x = 0.0;
                     let total_w = ui.available_width();
                     let tab_w = total_w / 2.0;
-                    for &mode in &[Mode::Personal, Mode::Customers] {
+                    for &mode in &[Mode::Personal, Mode::School] {
                         let label = match mode {
                             Mode::Personal => "Personal",
-                            Mode::Customers => "Customers",
+                            Mode::School => "School",
                         };
                         let active = self.mode == mode;
                         let (rect, resp) = ui.allocate_exact_size(
@@ -396,7 +397,7 @@ impl ProjectApp {
                                 egui::pos2(rect.min.x + 3.0, rect.min.y),
                                 Vec2::new(width - 3.0, height),
                             );
-                            ui.painter().rect_filled(card_rect, 6.0, SURFACE);
+                            ui.painter().rect_filled(card_rect, 0.0, SURFACE);
 
                             ui.painter().text(
                                 egui::pos2(rect.min.x + 14.0, rect.min.y + 7.0),
@@ -420,7 +421,7 @@ impl ProjectApp {
                                 let home = std::env::var("HOME").unwrap_or_else(|_| "/home/itaplyr".to_string());
                                 let base = match self.mode {
                                     Mode::Personal => PathBuf::from(&home).join("Projects"),
-                                    Mode::Customers => PathBuf::from(&home).join("CustomerProjects"),
+                                    Mode::School => PathBuf::from(&home).join("SchoolProjects"),
                                 };
                                 let new_path = base.join(&self.search_query);
                                 let _ = std::fs::create_dir_all(&new_path);
@@ -453,7 +454,7 @@ impl ProjectApp {
                                 egui::pos2(rect.min.x + if is_selected { 3.0 } else { 0.0 }, rect.min.y),
                                 Vec2::new(width - if is_selected { 3.0 } else { 0.0 }, height),
                             );
-                            ui.painter().rect_filled(card_rect, 6.0, bg);
+                            ui.painter().rect_filled(card_rect, 0.0, bg);
 
                             if resp.clicked() {
                                 self.selected = idx;
@@ -499,6 +500,9 @@ impl ProjectApp {
                     });
             });
 
+            let screen = ui.clip_rect();
+            ui.painter().rect_stroke(screen, 0.0, egui::Stroke::new(1.0_f32, WHITE), egui::StrokeKind::Inside);
+
             if let Some(idx) = self.confirm_delete {
                 let name = if idx < self.projects.len() {
                     self.projects[idx].name.clone()
@@ -510,7 +514,7 @@ impl ProjectApp {
                 ui.painter().rect_filled(screen, 0.0, egui::Color32::from_black_alpha(160));
 
                 let dlg = egui::Rect::from_center_size(screen.center(), egui::vec2(360.0, 120.0));
-                ui.painter().rect_filled(dlg, 8.0, SURFACE);
+                ui.painter().rect_filled(dlg, 0.0, SURFACE);
 
                 ui.painter().text(
                     egui::pos2(dlg.center().x, dlg.min.y + 30.0),
@@ -530,9 +534,9 @@ impl ProjectApp {
                     );
 
                     if selected {
-                        ui.painter().rect_filled(btn, 4.0, BLUE);
+                        ui.painter().rect_filled(btn, 0.0, BLUE);
                     } else {
-                        ui.painter().rect_stroke(btn, 4.0, egui::Stroke::new(1.0_f32, MUTED), egui::StrokeKind::Inside);
+                        ui.painter().rect_stroke(btn, 0.0, egui::Stroke::new(1.0_f32, MUTED), egui::StrokeKind::Inside);
                     }
 
                     ui.painter().text(
